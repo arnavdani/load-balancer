@@ -1,9 +1,12 @@
 package main
 
 import (
+	"log"
+	"net"
 	"net/http/httputil"
 	"net/url"
 	"sync"
+	"time"
 )
 
 //// DEFINING INSTANCE OF BACKEND SERVER
@@ -63,4 +66,29 @@ func (sl *ServerList) GetNextAliveServer() *BackendServer {
 		}
 	}
 	return nil
+}
+
+// send heartbeats to get status of current server
+// return true if server accepts ping-ack aka is alive
+//
+//	otherwise false
+func (bs *BackendServer) send_ping_ack() bool {
+	timeout := 1 * time.Second
+	dial := net.Dialer{Timeout: timeout}
+	conn, err := dial.Dial("tcp", bs.URL.Host)
+	if err != nil {
+		log.Printf("Server %s down - error: %s", bs.URL.String(), err.Error())
+		return false
+	}
+	defer conn.Close()
+	return true
+}
+
+// check and update status of all servers
+func (sl *ServerList) pool_ping_acks() {
+	for i, server := range sl.backend_list {
+		is_alive := server.send_ping_ack()
+		server.setAlive(is_alive)
+		log.Printf("Server %d : %s status: %t", i, sl.backend_list[i].URL.String(), is_alive)
+	}
 }
