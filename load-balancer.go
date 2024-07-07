@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -45,7 +48,7 @@ func (backend *BackendServer) is_alive() bool {
 // rotating index to send requests to
 type ServerList struct {
 	backend_list []*BackendServer
-	backend_map  map[*url.URL]uint64
+	backend_map  map[*url.URL]uint32
 	index        uint32
 	mutex        sync.RWMutex
 }
@@ -109,16 +112,31 @@ func (sl *ServerList) pool_ping_acks() {
 	}
 }
 
+// every 100 s, send pingacks to the entire server pool to update status
+func refresh_alive_servers() {
+	ticker := time.NewTicker(100 * time.Second)
+
+	go func() {
+		for {
+			select {
+			case _ = <-ticker.C:
+				pool.pool_ping_acks()
+			}
+		}
+	}()
+
+}
+
 // use http context to store and get the number of tries
 //
 //	to make the request succeed
 //
-// if no context value, that means current round in the first try
+// if no context value, that means no tries have been made, thus return 0
 func get_tries_from_req(req *http.Request) int {
 	if tries, ok := req.Context().Value(Tries).(int); ok {
 		return tries
 	}
-	return 1
+	return 0
 }
 
 var pool ServerList
@@ -126,7 +144,7 @@ var pool ServerList
 // http handler proper
 func balance(w http.ResponseWriter, r *http.Request) {
 	num_tries := get_tries_from_req(r)
-	if num_tries > 5 {
+	if num_tries > 5*len(pool.backend_list) {
 		log.Printf("Request %s from %s failed", r.URL.Path, r.RemoteAddr)
 		http.Error(w, "Request still failed after 5 tries", http.StatusRequestTimeout)
 	}
@@ -138,4 +156,64 @@ func balance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "No available server", http.StatusServiceUnavailable)
+}
+
+func main() {
+	var input_str = flag.String("s", "", "input a comma separated list of servers")
+	var port = flag.String("p", "5252", "host port of lb")
+	if len(*input_str) == 0 {
+		log.Fatal("Give >1 backend server addr to balance load")
+	}
+	flag.Parse()
+
+	server_list := strings.Split((*input_str), ",")
+
+	// set up server objects
+	for _, server := range server_list {
+		s_url, err := url.Parse(server)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		reverse_proxy := httputil.NewSingleHostReverseProxy(s_url)
+		reverse_proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, e error) {
+			log.Printf("Error found. Backend host: %s\nError:%s", r.Host, e.Error())
+			tries := get_tries_from_req(r)
+			if tries < 5 { // increment tries
+				ctx := context.WithValue(r.Context(), Tries, tries+1)
+				reverse_proxy.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			//if > 5 tries, fully retry request
+			// mark server as down as well
+			pool.backend_list[pool.backend_map[s_url]].set_alive(false)
+			log.Printf("%s: Retrying request on other backend", r.RemoteAddr)
+			ctx := context.WithValue(r.Context(), Tries, tries+1)
+			reverse_proxy.ServeHTTP(w, r.WithContext(ctx))
+			balance(w, r.WithContext(ctx))
+		}
+
+		pool.add_server(&BackendServer{
+			URL:     s_url,
+			alive:   true,
+			r_proxy: reverse_proxy,
+		})
+		log.Printf("New backend server %s\n", s_url)
+	}
+
+	// start up load balancer
+	s := http.Server{
+		Addr:    *port,
+		Handler: http.HandlerFunc(balance),
+	}
+
+	go refresh_alive_servers()
+
+	err := s.ListenAndServe()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 }
