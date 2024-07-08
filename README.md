@@ -14,5 +14,6 @@ sources used (outside of go stl):
 https://github.com/golang/go/issues/14329
 https://medium.com/geekculture/demystifying-http-handlers-in-golang-a363e4222756
 https://gobyexample.com/tickers
+https://hub.docker.com/r/strm/helloworld-http - basis for dockerfile
 
 also stole dockerfile from the first article

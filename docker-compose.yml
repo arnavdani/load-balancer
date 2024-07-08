@@ -5,7 +5,7 @@ services:
     container_name: load-balancer
     ports:
       - "5252:5252"
-    command: --backends "http://bs1:80,http://bs2:80,http://bs3:80"
+    command: -s "http://bs1:80,http://bs2:80,http://bs3:80" -p ":5252"
   bs1:
     image: strm/helloworld-http
   bs2:

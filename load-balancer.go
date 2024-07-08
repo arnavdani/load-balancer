@@ -161,10 +161,11 @@ func balance(w http.ResponseWriter, r *http.Request) {
 func main() {
 	var input_str = flag.String("s", "", "input a comma separated list of servers")
 	var port = flag.String("p", "5252", "host port of lb")
-	if len(*input_str) == 0 {
-		log.Fatal("Give >1 backend server addr to balance load")
-	}
+
 	flag.Parse()
+	if len(*input_str) == 0 {
+		log.Fatal("Give >1 backend server addr to balance load - receieved " + *input_str)
+	}
 
 	server_list := strings.Split((*input_str), ",")
 
