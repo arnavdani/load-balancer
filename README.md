@@ -17,3 +17,9 @@ https://gobyexample.com/tickers
 https://hub.docker.com/r/strm/helloworld-http - basis for dockerfile
 
 also stole dockerfile from the first article
+
+## deviations from the article
+
+1. my own backend server
+2. tracking of job size - sending over http
+

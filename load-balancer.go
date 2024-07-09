@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -14,7 +16,8 @@ import (
 )
 
 const (
-	Tries = "NumTries"
+	Tries   = "Tries"
+	JobSize = "JobSize"
 )
 
 // for http context reasons
@@ -148,6 +151,11 @@ func balance(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Request %s from %s failed", r.URL.Path, r.RemoteAddr)
 		http.Error(w, "Request still failed after 5 tries", http.StatusRequestTimeout)
 	}
+
+	job_size := rand.Intn(10) + 1
+	ctx := context.WithValue(r.Context(), JobSize, job_size)
+	r = r.WithContext(ctx)
+	r.Header.Set(JobSize, fmt.Sprintf("%d", job_size))
 
 	target := pool.get_next_alive_server()
 	if target != nil {

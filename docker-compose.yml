@@ -1,4 +1,4 @@
-version: "2"
+version: "3"
 services:
   front:
     build:
@@ -10,6 +10,7 @@ services:
     command: -s "http://bs1:80,http://bs2:80,http://bs3:80" -p ":5252"
     labels:
       - com.host.description=label
+    hostname: loadbalancer
   bs1:
     build:
       context: .
@@ -19,6 +20,7 @@ services:
       - "5453:80"
     labels:
       - com.host.description=label
+    hostname: Backend 1
     #command: ""
   bs2:
     build:
@@ -29,6 +31,7 @@ services:
       - "5454:80"
     labels:
       - com.host.description=label
+    hostname: Backend 2
     #command: ""
   bs3:
     build:
@@ -39,4 +42,5 @@ services:
       - "5455:80"
     labels:
       - com.host.description=label
+    hostname: Backend 3
     #command: ""
