@@ -1,0 +1,23 @@
+FROM alpine:latest AS builder
+WORKDIR /app
+COPY backend.py ./
+# RUN chmod +x /main.sh
+
+FROM alpine:latest
+RUN apk update && \
+    apk add --update python3
+RUN apk --no-cache add ca-certificates
+RUN apk add sudo && \
+    adduser -D -g '' docker && \
+    echo "docker:docker" | chpasswd && \
+    echo "docker ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/docker
+
+
+USER docker
+
+COPY --from=builder /app/backend.py .
+
+RUN ls -al
+EXPOSE 80
+
+CMD ["python", "-u", "backend.py"]

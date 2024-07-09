@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	Tries int = 1
+	Tries = "NumTries"
 )
 
 // for http context reasons

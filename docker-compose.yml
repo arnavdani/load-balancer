@@ -1,14 +1,42 @@
 version: "2"
 services:
   front:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.lb
     container_name: load-balancer
     ports:
       - "5252:5252"
     command: -s "http://bs1:80,http://bs2:80,http://bs3:80" -p ":5252"
+    labels:
+      - com.host.description=label
   bs1:
-    image: strm/helloworld-http
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: bs1
+    ports:
+      - "5453:80"
+    labels:
+      - com.host.description=label
+    #command: ""
   bs2:
-    image: strm/helloworld-http
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: bs2
+    ports:
+      - "5454:80"
+    labels:
+      - com.host.description=label
+    #command: ""
   bs3:
-    image: strm/helloworld-http
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: bs3
+    ports:
+      - "5455:80"
+    labels:
+      - com.host.description=label
+    #command: ""
