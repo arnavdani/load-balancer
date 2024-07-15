@@ -7,7 +7,7 @@ services:
     container_name: load-balancer
     ports:
       - "5252:5252"
-    command: -s "http://bs1:80,http://bs2:80,http://bs3:80" -p ":5252"
+    command: -o ":5252" -i ":9797"
     labels:
       - com.host.description=label
     hostname: loadbalancer

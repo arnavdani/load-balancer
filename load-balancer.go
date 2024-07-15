@@ -10,19 +10,27 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	Tries   = "Tries"
-	JobSize = "JobSize"
+	Tries          = "Tries"
+	Compute        = "Compute"
+	Storage        = "Storage"
+	Compute_Vector = "Compute-Vector"
+	Storage_Vector = "Storage-Vector"
 )
 
 // for http context reasons
 
-//// DEFINING INSTANCE OF BACKEND SERVER
+// // DEFINING JOB
+type Job struct {
+	compute int
+	storage int
+}
+
+//// DEFINING BACKEND SERVER
 
 type BackendServer struct {
 	URL     *url.URL
@@ -73,7 +81,8 @@ func (sl *ServerList) add_server(b *BackendServer) {
 //
 // Updates the serverlist index iff a match is found
 // returns the server matched
-func (sl *ServerList) get_next_alive_server() *BackendServer {
+func (sl *ServerList) get_next_alive_server(j *Job) *BackendServer {
+	// var dom int
 	sl.mutex.RLock()
 	serverlist_len := uint32(len(sl.backend_list))
 	sl_index := sl.index
@@ -152,12 +161,17 @@ func balance(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Request still failed after 5 tries", http.StatusRequestTimeout)
 	}
 
-	job_size := rand.Intn(10) + 1
-	ctx := context.WithValue(r.Context(), JobSize, job_size)
-	r = r.WithContext(ctx)
-	r.Header.Set(JobSize, fmt.Sprintf("%d", job_size))
+	compute_reqs := rand.Intn(10) + 1
+	storage_reqs := rand.Intn(10) + 1
+	compute_ctx := context.WithValue(r.Context(), Compute, compute_reqs)
+	full_ctx := context.WithValue(compute_ctx, Storage, storage_reqs)
+	r = r.WithContext(full_ctx)
+	r.Header.Set(Compute, fmt.Sprintf("%d", compute_reqs))
+	r.Header.Set(Storage, fmt.Sprintf("%d", storage_reqs))
 
-	target := pool.get_next_alive_server()
+	job := Job{compute: compute_reqs, storage: storage_reqs}
+
+	target := pool.get_next_alive_server(&job)
 	if target != nil {
 		target.r_proxy.ServeHTTP(w, r)
 		return
@@ -166,63 +180,95 @@ func balance(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "No available server", http.StatusServiceUnavailable)
 }
 
-func main() {
-	var input_str = flag.String("s", "", "input a comma separated list of servers")
-	var port = flag.String("p", "5252", "host port of lb")
+func setup_incoming_server(w http.ResponseWriter, r *http.Request) {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
 
-	flag.Parse()
-	if len(*input_str) == 0 {
-		log.Fatal("Give >1 backend server addr to balance load - receieved " + *input_str)
-	}
-
-	server_list := strings.Split((*input_str), ",")
-
-	// set up server objects
-	for _, server := range server_list {
-		s_url, err := url.Parse(server)
-
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		reverse_proxy := httputil.NewSingleHostReverseProxy(s_url)
-		reverse_proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, e error) {
-			log.Printf("Error found. Backend host: %s\nError:%s", r.Host, e.Error())
-			tries := get_tries_from_req(r)
-			if tries < 5 { // increment tries
-				ctx := context.WithValue(r.Context(), Tries, tries+1)
-				reverse_proxy.ServeHTTP(w, r.WithContext(ctx))
-				return
-			}
-
-			//if > 5 tries, fully retry request
-			// mark server as down as well
-			pool.backend_list[pool.backend_map[s_url]].set_alive(false)
-			log.Printf("%s: Retrying request on other backend", r.RemoteAddr)
-			ctx := context.WithValue(r.Context(), Tries, tries+1)
-			reverse_proxy.ServeHTTP(w, r.WithContext(ctx))
-			balance(w, r.WithContext(ctx))
-		}
-
-		pool.add_server(&BackendServer{
-			URL:     s_url,
-			alive:   true,
-			r_proxy: reverse_proxy,
-		})
-		log.Printf("New backend server %s\n", s_url)
-	}
-
-	// start up load balancer
-	s := http.Server{
-		Addr:    *port,
-		Handler: http.HandlerFunc(balance),
-	}
-
-	go refresh_alive_servers()
-
-	err := s.ListenAndServe()
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	// cv := r.Header.Get(Compute_Vector)
+	// sv := r.Header.Get(Storage_Vector)
+
+	s_url, err := url.Parse(fmt.Sprintf("http://%s:80", host))
+	log.Printf("%s:%s\n", host, "80")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	reverse_proxy := httputil.NewSingleHostReverseProxy(s_url)
+	reverse_proxy.ErrorHandler = func(wr http.ResponseWriter, req *http.Request, e error) {
+		log.Printf("Error found. Backend host: %s\nError:%s", req.Host, e.Error())
+		tries := get_tries_from_req(req)
+		if tries < 5 { // increment tries
+			ctx := context.WithValue(req.Context(), Tries, tries+1)
+			reverse_proxy.ServeHTTP(wr, req.WithContext(ctx))
+			return
+		}
+
+		//if > 5 tries, fully retry request
+		// mark server as down as well
+		pool.backend_list[pool.backend_map[s_url]].set_alive(false)
+		log.Printf("%s: Retrying request on other backend", req.RemoteAddr)
+		ctx := context.WithValue(req.Context(), Tries, tries+1)
+		reverse_proxy.ServeHTTP(wr, req.WithContext(ctx))
+		balance(wr, req.WithContext(ctx))
+	}
+
+	pool.add_server(&BackendServer{
+		URL:     s_url,
+		alive:   true,
+		r_proxy: reverse_proxy,
+	})
+	log.Printf("New backend server %s\n", s_url)
+	fmt.Fprintf(w, "Server accepted\n")
+}
+
+func main() {
+	var in_port = flag.String("i", "9797", "lb connection acceptor")
+	var lb_port = flag.String("o", "5252", "host port of lb")
+	flag.Parse()
+
+	// set up wait group
+	// process isn't terminated until all entries in wg are marked as done
+	var wg sync.WaitGroup
+
+	in_s := http.Server{
+		Addr:    *in_port,
+		Handler: http.HandlerFunc(setup_incoming_server),
+	}
+
+	// start up input server - collect backend incoming
+	wg.Add(1)
+	go func(wg *sync.WaitGroup) {
+		defer wg.Done()
+		err := in_s.ListenAndServe()
+		fmt.Printf("%s\n", in_s.Addr)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+	}(&wg)
+
+	// start ping acks - assume connections have come in
+	go refresh_alive_servers()
+
+	lb_s := http.Server{
+		Addr:    *lb_port,
+		Handler: http.HandlerFunc(balance),
+	}
+
+	// start load balancing server
+	wg.Add(1)
+	go func(wg *sync.WaitGroup) {
+		defer wg.Done()
+		fmt.Printf("%s\n", lb_s.Addr)
+		err := lb_s.ListenAndServe()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}(&wg)
+
+	fmt.Printf("Both servers started\n")
+	wg.Wait()
 }
