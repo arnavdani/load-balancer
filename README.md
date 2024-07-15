@@ -23,7 +23,29 @@ also stole dockerfile from the first article
 
 ## usage
 
+prerequisites: Docker, Docker Desktop (ideally), Internet Conn
+
+1. By default, this load balancer can be simulated by running `deploy.sh`. This will deploy the load balancer (defined by `load-balancer.go`) and 3 separate backend servers (all are the same, defined by `backend.py`) to 4 different docker containers (all running Alpine).
+
+Refer to docker-compose for more details - main load balancer is deployed to `localhost:5252` (shoutout Patrick Willis). Python servers are deployed to `:5453` (thank you Fred Warner + Navarro Bowman), `:5454` (Fred Warner x2), `:5455` (Fred Warner, Ahmad Brooks).
+
+To use, visit `localhost:5252` in browser - request will be automatically balanced between the 3 available backends.
+
+## Implementation Details
+
+The 3 backends alert the load balancer of its existence via the server set up on `load-balancer:9797` (shoutout Nick Bosa). In addition, ping-acks are sent every 100s to verify the uptime of all participating backend servers.
+
+The strategy used to balance these loads uses the same rational as the Hadoop DRF scheduling algorithm. While that is designed to schedule multiple jobs on one unit, I will apply the same logic of leveraging the ratios between expected resource demand to best balance the load.
+
+Since all my testing is simulated anyway, I am using rng at initialization to quantify the requirements of the job and the behavior of each backend server.
 
 ## other concerns
 
 1. Serverside in python? -> Yes, the GIL sucks. However, it is at its worst when multiple threads share a resource. Take a look at the backend code here; there are no resources being shared between any threads here. Therefore, a single cpu core + all possible threads are enough. Used python for backend its the easiest to debug (ChatGPT wrote it + I fixed its mistakes).
+
+## cool things i learned about (wip)
+
+go sync primitives (rw locks, wait groups)
+reverse proxy
+http request header, context, request manipulation
+nested functions

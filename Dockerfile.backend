@@ -2,7 +2,6 @@ FROM alpine:latest AS builder
 LABEL stage=builder
 WORKDIR /app
 COPY backend.py ./
-# RUN chmod +x /main.sh
 
 FROM alpine:latest
 RUN apk update && \
