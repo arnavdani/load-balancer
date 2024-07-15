@@ -243,7 +243,6 @@ func main() {
 	go func(wg *sync.WaitGroup) {
 		defer wg.Done()
 		err := in_s.ListenAndServe()
-		fmt.Printf("%s\n", in_s.Addr)
 
 		if err != nil {
 			log.Fatal(err)
@@ -262,7 +261,6 @@ func main() {
 	wg.Add(1)
 	go func(wg *sync.WaitGroup) {
 		defer wg.Done()
-		fmt.Printf("%s\n", lb_s.Addr)
 		err := lb_s.ListenAndServe()
 		if err != nil {
 			log.Fatal(err)

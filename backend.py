@@ -8,6 +8,7 @@ hostName = "0.0.0.0"
 serverPort = 80
 Compute = "Compute"
 Storage = "Storage"
+lb_host = "load-balancer:9797"  # Use the Docker service name for the load balancer
 
 total_compute = 0
 total_storage = 0
@@ -31,12 +32,52 @@ class MyServer(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/html")
         self.end_headers()
-        self.wfile.write(bytes("<html><head><title>Python Web Server</title></head>", "utf-8"))
-        self.wfile.write(bytes(f"<p>Backend Server Hostname: {client_hostname}</p>", "utf-8"))
-        self.wfile.write(bytes(f"<p>Total Compute used: {total_compute}</p>", "utf-8"))
-        self.wfile.write(bytes(f"<p>Total Storage used: {total_storage}</p>", "utf-8"))
-        self.wfile.write(bytes(f"<p>Current Job Compute: {compute}</p>", "utf-8"))
-        self.wfile.write(bytes(f"<p>Current Job Storage: {storage}</p>", "utf-8"))
+        self.wfile.write(generate_html(client_hostname, compute, storage).encode('utf-8'))
+
+def generate_html(client_hostname, compute, storage):
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Python Web Server</title>
+        <style>
+            body {{
+                font-family: Arial, sans-serif;
+                margin: 40px;
+                padding: 20px;
+                background-color: #f4f4f4;
+            }}
+            h1 {{
+                color: #333;
+            }}
+            .container {{
+                max-width: 800px;
+                margin: 0 auto;
+                background: #fff;
+                padding: 20px;
+                box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            }}
+            p {{
+                line-height: 1.6;
+            }}
+            .highlight {{
+                color: #e74c3c;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>{client_hostname} - Server Status</h1>
+            <p><strong>Total Compute used:</strong> <span class="highlight">{total_compute}</span></p>
+            <p><strong>Total Storage used:</strong> <span class="highlight">{total_storage}</span></p>
+            <p><strong>Current Job Compute:</strong> {compute}</p>
+            <p><strong>Current Job Storage:</strong> {storage}</p>
+        </div>
+    </body>
+    </html>
+    """
 
 def http_client(host, path, headers=None):
     # Create a connection to the server
@@ -52,9 +93,7 @@ def http_client(host, path, headers=None):
         # Read the response content
         data = response.read()
         
-        # Print the status, reason, and data
-        print("Status:", response.status)
-        print("Reason:", response.reason)
+        # Print the results of the request
         print("Data:", data.decode())
         
     finally:
@@ -66,12 +105,12 @@ if __name__ == "__main__":
     path = "/"
     compute_vector = random.randint(1, 10) * 10
     storage_vector = random.randint(1, 10) * 10
+
     headers = {
         "Compute-Vector": str(compute_vector),
         "Storage-Vector": str(storage_vector)
     }
-    host = "load-balancer:9797"  # Use the Docker service name for the load balancer
-    http_client(host, path, headers)
+    http_client(lb_host, path, headers)
 
     # Start the backend server
     webServer = HTTPServer((hostName, serverPort), MyServer)
