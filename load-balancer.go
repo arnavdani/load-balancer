@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"html/template"
 	"log"
 	"math"
 	"math/rand"
@@ -24,6 +25,14 @@ const (
 	Storage_Vector = "Storage-Vector"
 )
 
+var pool ServerList
+var requestLog []string
+var templates *template.Template
+
+func init() {
+	templates = template.Must(template.ParseFiles("./frontend.html"))
+}
+
 // for http context reasons
 
 // // DEFINING JOB
@@ -35,11 +44,13 @@ type Job struct {
 //// DEFINING BACKEND SERVER
 
 type BackendServer struct {
-	URL     *url.URL
-	alive   bool
-	r_proxy *httputil.ReverseProxy
-	mutex   sync.RWMutex
-	ratio   float64 // ratio is compute : storage
+	URL          *url.URL
+	alive        bool
+	r_proxy      *httputil.ReverseProxy
+	mutex        sync.RWMutex
+	ratio        float64 // ratio is compute : storage
+	TotalStorage int
+	TotalCompute int
 }
 
 // writes state of backend server
@@ -93,12 +104,15 @@ func (sl *ServerList) get_next_alive_server(j *Job) *BackendServer {
 	sl_index := sl.index
 	sl.mutex.RUnlock()
 
-	min_pct_err := 1.0
+	min_pct_err := math.Inf(1)
 	min_index := -1
 	for i := uint64(0); i < sl_index+serverlist_len; i++ {
 		server_ratio := sl.backend_list[i].ratio
 		pct_err := math.Abs((server_ratio - job_ratio) / max(job_ratio, server_ratio))
-		if pct_err < float64(0.15) {
+		if pct_err < float64(0.2) {
+			// if within 20% of expected ratio, opportunistically direct to that server
+			sl.backend_list[i].TotalCompute += j.compute
+			sl.backend_list[i].TotalStorage += j.storage
 			return sl.backend_list[i]
 		}
 
@@ -111,7 +125,8 @@ func (sl *ServerList) get_next_alive_server(j *Job) *BackendServer {
 		log.Printf("no match found \nJob Details: %f min pct:%f mi:%d\n", job_ratio, min_pct_err, min_index)
 		return nil
 	}
-
+	sl.backend_list[min_index].TotalCompute += j.compute
+	sl.backend_list[min_index].TotalStorage += j.storage
 	return sl.backend_list[min_index]
 }
 
@@ -166,8 +181,6 @@ func get_tries_from_req(req *http.Request) int {
 	}
 	return 0
 }
-
-var pool ServerList
 
 // http handler proper
 func balance(w http.ResponseWriter, r *http.Request) {
@@ -255,14 +268,73 @@ func setup_incoming_server(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Server accepted\n")
 }
 
+func frontendHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+
+	// Execute the template with the backend list data
+	if err := templates.ExecuteTemplate(w, "frontend.html", pool.backend_list); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func statusHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `
+        <table>
+            <tr>
+                <th>Backend Server</th>
+                <th>Status</th>
+                <th>Total Compute</th>
+                <th>Total Storage</th>
+            </tr>
+    `)
+
+	for _, server := range pool.backend_list {
+		status := "Down"
+		statusColor := "red"
+		if server.alive {
+			status = "Up"
+			statusColor = "green"
+		}
+		fmt.Fprintf(w, `
+            <tr>
+                <td>%s</td>
+                <td style="color: %s;">%s</td>
+                <td>%d</td>
+                <td>%d</td>
+            </tr>
+        `, server.URL.String(), statusColor, status, server.TotalCompute, server.TotalStorage)
+	}
+
+	fmt.Fprintf(w, `
+        </table>
+    `)
+}
+
+func requestsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(requestLog)
+}
+
 func main() {
-	var in_port = flag.String("i", "9797", "lb connection acceptor")
-	var lb_port = flag.String("o", "5252", "host port of lb")
+	var in_port = flag.String("i", ":9797", "lb connection acceptor")
+	var lb_port = flag.String("o", ":5252", "host port of lb")
+	var fe_port = flag.String("f", ":9494", "frontend viewing port")
 	flag.Parse()
 
 	// set up wait group
 	// process isn't terminated until all entries in wg are marked as done
 	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		templates = template.Must(template.ParseFiles("./frontend.html"))
+		http.HandleFunc("/frontend", frontendHandler)
+		http.HandleFunc("/status", statusHandler)
+		http.HandleFunc("/request-log", requestsHandler)
+		log.Fatal(http.ListenAndServe(*fe_port, http.HandlerFunc(frontendHandler)))
+	}()
 
 	in_s := http.Server{
 		Addr:    *in_port,

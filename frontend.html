@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Load Balancer Dashboard</title>
+    <style>
+        .server {
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            width: 400px;
+        }
+        .bar {
+            height: 20px;
+            margin-bottom: 5px;
+            color: white;
+            text-align: center;
+        }
+        .compute {
+            background-color: blue;
+            width: 15px;
+        }
+        .storage {
+            background-color: orange;
+            width: 15px;
+        }
+    </style>
+</head>
+<body>
+    {{range .}}
+    <div class="server">
+        <h3>{{.URL}}</h3>
+        <div class="bar compute">{{.TotalCompute}}</div>
+        <div class="bar storage">{{.TotalStorage}}</div>
+    </div>
+    {{end}}
+</body>
+</html>
