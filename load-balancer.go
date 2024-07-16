@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"net"
 	"net/http"
@@ -37,6 +39,7 @@ type BackendServer struct {
 	alive   bool
 	r_proxy *httputil.ReverseProxy
 	mutex   sync.RWMutex
+	ratio   float64 // ratio is compute : storage
 }
 
 // writes state of backend server
@@ -60,7 +63,7 @@ func (backend *BackendServer) is_alive() bool {
 type ServerList struct {
 	backend_list []*BackendServer
 	backend_map  map[*url.URL]uint32
-	index        uint32
+	index        uint64
 	mutex        sync.RWMutex
 }
 
@@ -71,7 +74,9 @@ func (sl *ServerList) update_server_status(url *url.URL, is_alive bool) {
 }
 
 func (sl *ServerList) add_server(b *BackendServer) {
+	sl.mutex.Lock()
 	sl.backend_list = append(sl.backend_list, b)
+	sl.mutex.Unlock()
 }
 
 // gets the "next" alive server
@@ -82,21 +87,32 @@ func (sl *ServerList) add_server(b *BackendServer) {
 // Updates the serverlist index iff a match is found
 // returns the server matched
 func (sl *ServerList) get_next_alive_server(j *Job) *BackendServer {
-	// var dom int
+	job_ratio := float64(j.compute) / float64(j.storage)
 	sl.mutex.RLock()
-	serverlist_len := uint32(len(sl.backend_list))
+	serverlist_len := uint64(len(sl.backend_list))
 	sl_index := sl.index
 	sl.mutex.RUnlock()
-	for i := sl_index + 1; i < sl_index+serverlist_len; i++ {
-		next := i % serverlist_len
-		if sl.backend_list[next].is_alive() {
-			sl.mutex.Lock()
-			sl.index = next
-			sl.mutex.Unlock()
-			return sl.backend_list[next]
+
+	min_pct_err := 1.0
+	min_index := -1
+	for i := uint64(0); i < sl_index+serverlist_len; i++ {
+		server_ratio := sl.backend_list[i].ratio
+		pct_err := math.Abs((server_ratio - job_ratio) / max(job_ratio, server_ratio))
+		if pct_err < float64(0.15) {
+			return sl.backend_list[i]
+		}
+
+		if pct_err < min_pct_err {
+			min_pct_err = pct_err
+			min_index = int(i)
 		}
 	}
-	return nil
+	if min_index < 0 {
+		log.Printf("no match found \nJob Details: %f min pct:%f mi:%d\n", job_ratio, min_pct_err, min_index)
+		return nil
+	}
+
+	return sl.backend_list[min_index]
 }
 
 // send heartbeats to get status of current server
@@ -181,14 +197,28 @@ func balance(w http.ResponseWriter, r *http.Request) {
 }
 
 func setup_incoming_server(w http.ResponseWriter, r *http.Request) {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	// Read and parse the JSON body
+	var payload map[string]int
+	err := json.NewDecoder(r.Body).Decode(&payload)
+	if err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
 
+	compute, computeOk := payload["Compute-Vector"]
+	storage, storageOk := payload["Storage-Vector"]
+
+	if !computeOk || !storageOk {
+		http.Error(w, "Missing compute or storage vector", http.StatusBadRequest)
+		return
+	}
+	ratio := float64(compute) / float64(storage)
+	log.Printf("Accepted %s - Ratio: %f", r.RemoteAddr, ratio)
+
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	// cv := r.Header.Get(Compute_Vector)
-	// sv := r.Header.Get(Storage_Vector)
 
 	s_url, err := url.Parse(fmt.Sprintf("http://%s:80", host))
 	log.Printf("%s:%s\n", host, "80")
@@ -219,6 +249,7 @@ func setup_incoming_server(w http.ResponseWriter, r *http.Request) {
 		URL:     s_url,
 		alive:   true,
 		r_proxy: reverse_proxy,
+		ratio:   ratio,
 	})
 	log.Printf("New backend server %s\n", s_url)
 	fmt.Fprintf(w, "Server accepted\n")

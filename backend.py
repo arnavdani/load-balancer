@@ -3,6 +3,7 @@ import http.client
 import socket
 import random
 import time
+import json
 
 hostName = "0.0.0.0"
 serverPort = 80
@@ -22,17 +23,17 @@ class MyServer(BaseHTTPRequestHandler):
         except socket.herror:
             client_hostname = "Unknown"
 
-        compute = self.headers.get(Compute, "0")
-        storage = self.headers.get(Storage, "0")
+        current_job_compute = self.headers.get(Compute, "0")
+        current_job_storage = self.headers.get(Storage, "0")
 
-        total_compute += int(compute)
-        total_storage += int(storage)
+        total_compute += int(current_job_compute)
+        total_storage += int(current_job_storage)
 
         # Send the response
         self.send_response(200)
         self.send_header("Content-type", "text/html")
         self.end_headers()
-        self.wfile.write(generate_html(client_hostname, compute, storage).encode('utf-8'))
+        self.wfile.write(generate_html(client_hostname, current_job_compute, current_job_storage).encode('utf-8'))
 
 def generate_html(client_hostname, compute, storage):
     return f"""
@@ -79,13 +80,16 @@ def generate_html(client_hostname, compute, storage):
     </html>
     """
 
-def http_client(host, path, headers=None):
+def http_client(host, path, body):
     # Create a connection to the server
     conn = http.client.HTTPConnection(host)
     
     try:
         # Send a GET request to the specified path with custom headers
-        conn.request("GET", path, headers=headers)
+        headers = {
+            'Content-Type': 'application/json'
+        }
+        conn.request("GET", path, body=body, headers=headers)
         
         # Get the response from the server
         response = conn.getresponse()
@@ -101,20 +105,20 @@ def http_client(host, path, headers=None):
         conn.close()    
 
 if __name__ == "__main__":
-    time.sleep(10)  # Wait for the load balancer to start
+    time.sleep(3)  # Wait for the load balancer to start
     path = "/"
-    compute_vector = random.randint(1, 10) * 10
-    storage_vector = random.randint(1, 10) * 10
+    compute_vector = 20
+    storage_vector = random.randint(1, 40) 
 
-    headers = {
-        "Compute-Vector": str(compute_vector),
-        "Storage-Vector": str(storage_vector)
-    }
-    http_client(lb_host, path, headers)
+    body = json.dumps({
+        "Compute-Vector": compute_vector,
+        "Storage-Vector": storage_vector
+    })
+    http_client(lb_host, path, body)
 
     # Start the backend server
     webServer = HTTPServer((hostName, serverPort), MyServer)
-    print(f"Server started at http://{hostName}:{serverPort}")
+    print(f"Server started at http://{hostName}:{serverPort}, ratio {compute_vector / storage_vector}")
     try:
         webServer.serve_forever()
     except KeyboardInterrupt:
