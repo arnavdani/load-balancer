@@ -20,6 +20,7 @@ also stole dockerfile from the first article
 
 1. my own backend server - I maintain my own backend servers so that I can relay information that could be useful for balancing tasks.
 2. At uptime, the backend servers to balance between are not known at initialization to the load balancer. These servers send pings to the load balancer to notify it of its existence and availability. This is important because this makes an application easy to scale. Now, connections can be accepted on the fly and servers can be added to scale up and scale down infra as needed (instead of keeping it static).
+3. Better balancing algorithm - this uses a self designed algorithm based on the Hadoop DRF algorithm. Each load is matched to the best suited backend based on aligning compute and storage requirements. This is done by finding the ratio of compute:storage and matching it. For simluation purposes, the ratios of jobs and the backend servers are backed by RNG.
 
 ## usage
 
@@ -30,6 +31,8 @@ prerequisites: Docker, Docker Desktop (ideally), Internet Conn
 Refer to docker-compose for more details - main load balancer is deployed to `localhost:5252` (shoutout Patrick Willis). Python servers are deployed to `:5453` (thank you Fred Warner + Navarro Bowman), `:5454` (Fred Warner x2), `:5455` (Fred Warner, Ahmad Brooks).
 
 To use, visit `localhost:5252` in browser - request will be automatically balanced between the 3 available backends.
+
+To see basic UI about load balanced across all servers, visit `localhost:9494` (shoutout Justin Smith).
 
 ## Implementation Details
 
@@ -49,3 +52,7 @@ go sync primitives (rw locks, wait groups)
 reverse proxy
 http request header, context, request manipulation
 nested functions
+
+## next steps (if i ever come back)
+
+spam testing
